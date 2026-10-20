@@ -9,11 +9,8 @@ from core import (
 st.set_page_config(page_title="UniTramite AI | Atención a Estudiantes", page_icon="🎓", layout="wide")
 
 # En Streamlit Cloud (o .streamlit/secrets.toml) la URL de PostgreSQL llega como secreto
-try:
-    if "DATABASE_URL" in st.secrets:
-        os.environ.setdefault("DATABASE_URL", st.secrets["DATABASE_URL"])
-except FileNotFoundError:
-    pass
+if st.secrets.load_if_toml_exists() and "DATABASE_URL" in st.secrets:
+    os.environ.setdefault("DATABASE_URL", st.secrets["DATABASE_URL"])
 
 @st.cache_resource
 def setup_database():

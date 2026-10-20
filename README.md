@@ -41,47 +41,53 @@ Dónde se guardan:
 
 ## 3. Requisitos
 
-- Python 3.10 o superior.
-- `pip`.
-- VS Code u otro editor (opcional).
+Elige **una** de las dos formas de ejecutarla:
 
-## 4. Instalación reproducible
+- **Opción A — Docker (un solo comando):** [Docker Desktop](https://www.docker.com/products/docker-desktop/). No necesitas instalar Python ni PostgreSQL.
+- **Opción B — uv:** [uv](https://docs.astral.sh/uv/getting-started/installation/), el gestor de paquetes de Python. uv descarga por su cuenta la versión de Python del proyecto (3.12), así que no hace falta instalarla aparte.
 
-Descarga o clona el repositorio y entra en la carpeta del proyecto.
-
-### Windows (PowerShell)
+Para instalar uv:
 
 ```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -r requirements.txt
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
-
-Si PowerShell bloquea la activación, abre una terminal CMD y usa:
-
-```bat
-.venv\Scripts\activate.bat
-```
-
-### macOS / Linux
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-## 5. Ejecutar la demo
+Descarga o clona el repositorio y entra en la carpeta del proyecto antes de seguir.
 
-Desde la carpeta raíz y con el entorno virtual activado:
+## 4. Opción A: todo con Docker (app + PostgreSQL)
 
 ```bash
-streamlit run app.py
+docker compose up --build
 ```
 
-Streamlit mostrará una dirección local, normalmente `http://localhost:8501`. Ábrela en un navegador.
+Abre `http://localhost:8501`. Este comando levanta dos contenedores: la app y una base PostgreSQL local, la misma tecnología que usa Supabase. Los datos se guardan en un volumen de Docker y no se pierden al reiniciar.
+
+- Detener: `Ctrl+C`, o `docker compose down` si lo arrancaste con `-d`.
+- Borrar también los datos de la base local: `docker compose down -v`.
+- Usar Supabase en lugar de la base local: crea un archivo `.env` junto a `docker-compose.yml` con la línea `DATABASE_URL=postgresql://...` (ver sección 9) y vuelve a ejecutar `docker compose up --build`.
+
+## 5. Opción B: ejecutar con uv
+
+```bash
+uv sync
+uv run streamlit run app.py
+```
+
+`uv sync` crea el entorno virtual `.venv` e instala exactamente las versiones de `uv.lock`. `uv run` ejecuta dentro de ese entorno, sin tener que activarlo. Abre la dirección que muestra Streamlit, normalmente `http://localhost:8501`.
+
+Sin configurar nada, los datos se guardan en el archivo local `unitramite.db` (SQLite). Para usar Supabase, consulta la sección 9.
+
+Para agregar una dependencia usa `uv add nombre-paquete`. No edites `requirements.txt` a mano: se genera desde `uv.lock` y solo existe para las plataformas de publicación que lo piden (ver sección 9):
+
+```bash
+uv export --no-hashes --format requirements-txt --no-emit-project -o requirements.txt
+```
 
 ### Guion de demostración en clase
 
@@ -98,7 +104,7 @@ Los identificadores de tickets se generan en ejecución; usa el ticket que muest
 ## 6. Ejecutar pruebas automatizadas
 
 ```bash
-python -m unittest discover -s tests -v
+uv run python -m unittest discover -s tests -v
 ```
 
 Las pruebas verifican algunas funciones de validación y el formato de ticket. No sustituyen una evaluación completa del chatbot ni prueban una integración con WhatsApp.
@@ -106,11 +112,15 @@ Las pruebas verifican algunas funciones de validación y el formato de ticket. N
 ## 7. Estructura del proyecto
 
 ```text
-UniTramiteAI_Prototipo/
+UniTramiteAI/
 ├── app.py
 ├── core.py
 ├── whatsapp_webhook.py
-├── requirements.txt
+├── pyproject.toml        # dependencias (uv)
+├── uv.lock               # versiones exactas (uv)
+├── requirements.txt      # generado desde uv.lock para Streamlit Cloud
+├── Dockerfile
+├── docker-compose.yml    # app + PostgreSQL con un solo comando
 ├── README.md
 ├── data/
 │   └── students.json
@@ -135,7 +145,25 @@ git push -u origin main
 
 Sustituye `TU_USUARIO` por tu usuario real de GitHub y usa la URL que GitHub asigne a tu repositorio. No subas contraseñas, tokens ni archivos `.env`.
 
-## 9. Publicar una demo en Streamlit Community Cloud
+## 9. Publicar la demo
+
+### Dónde se publica cada parte
+
+| Parte | Dónde | Costo |
+|---|---|---|
+| Frontend + lógica (la app Streamlit) | **Streamlit Community Cloud** (recomendado) | Gratis |
+| Base de datos | **Supabase** | Gratis |
+
+En Streamlit el frontend y el backend son el mismo programa de Python, así que se publican juntos. **Vercel, Netlify o GitHub Pages no sirven**: solo alojan páginas estáticas o funciones cortas, y Streamlit necesita un servidor de Python encendido todo el tiempo. Supabase tampoco aloja la app, solo la base de datos.
+
+Alternativas si Streamlit Cloud no te sirve, ambas usando el `Dockerfile` del proyecto:
+
+- **Hugging Face Spaces** (gratis): crea un Space de tipo *Docker*. Spaces espera el puerto `7860`, así que hay que indicarle `app_port: 8501` en la cabecera del README del Space.
+- **Render** (plan gratis): crea un *Web Service* desde el repositorio con entorno *Docker*. En el plan gratis se duerme sin uso y tarda en despertar.
+
+En las dos, define `DATABASE_URL` en sus variables de entorno o *secrets*.
+
+### Streamlit Community Cloud
 
 1. Sube el repositorio a GitHub.
 2. Entra en Streamlit Community Cloud y conecta tu cuenta de GitHub.
@@ -169,7 +197,7 @@ Para usar la base en la nube desde tu computadora, crea el archivo `.streamlit/s
 Las pruebas usan SQLite temporal. Para repetirlas también contra PostgreSQL, define `TEST_DATABASE_URL` apuntando a una base **de pruebas**, nunca a la de la demo (las pruebas borran las tablas `students` y `requests`):
 
 ```bash
-TEST_DATABASE_URL="postgresql://..." python -m unittest discover -s tests -v
+TEST_DATABASE_URL="postgresql://..." uv run python -m unittest discover -s tests -v
 ```
 
 La disponibilidad del servicio y los pasos de la plataforma pueden cambiar. Antes de presentar, verifica que la URL pública abra correctamente.
