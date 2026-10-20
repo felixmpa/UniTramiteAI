@@ -98,3 +98,71 @@ def faq_answer(question):
 
 def validate_ticket_format(ticket):
     return bool(re.fullmatch(r"UT-\d{6}", ticket or ""))
+
+def detect_request_type(text):
+    t = text.lower()
+    if any(k in t for k in ["récord", "record", "historial académico"]):
+        return "Récord académico"
+    if any(k in t for k in ["certificación", "certificacion", "certificado", "constancia", "estudio"]):
+        return "Certificación de estudio"
+    return None
+
+def format_request(req):
+    return (
+        f"**Solicitud {req['ticket']}**\n\n"
+        f"- Tipo: {req['request_type']}\n"
+        f"- Estado: **{req['status']}**\n"
+        f"- Fecha de creación: {req['created_at']}\n"
+        f"- Observación: {req['notes']}"
+    )
+
+def register_request(student_id, request_type):
+    """Validate the student and store the request; returns the chatbot reply."""
+    student = get_student(student_id)
+    checks = validate_request(student, request_type)
+    missing = [name for name, ok in checks.items() if not ok]
+    if missing:
+        ticket = create_request(student_id, request_type, "Pendiente de revisión", "No cumple: " + ", ".join(missing))
+        return (
+            f"Registré la solicitud **{ticket}**, pero queda **Pendiente de revisión**.\n\n"
+            f"Validaciones que requieren atención: {', '.join(missing)}.\n\n"
+            "El prototipo no rechaza definitivamente la solicitud ni sustituye la revisión de la oficina académica."
+        )
+    ticket = create_request(student_id, request_type, "Recibida", "Validaciones simuladas completadas; pendiente de revisión institucional.")
+    return (
+        f"Las validaciones simuladas se completaron y registré la solicitud **{ticket}** con estado **Recibida**.\n\n"
+        "Esto no significa que el documento haya sido emitido. La oficina académica debe procesar la solicitud."
+    )
+
+def handle_message(prompt, state):
+    """Return the chatbot reply. `state` keeps pending_type/pending_student between turns and is updated in place."""
+    ticket_match = re.search(r"UT-\d{6}", prompt.upper())
+    if ticket_match:
+        req = get_request(ticket_match.group(0))
+        if req:
+            return format_request(req)
+        return "No encontré ese ticket en la base de datos simulada. Verifica el identificador o solicita ayuda al personal de atención."
+
+    request_type = detect_request_type(prompt)
+    if request_type:
+        state["pending_type"] = request_type
+    student_match = re.search(r"\b\d{4}-\d{4}\b", prompt)
+    if student_match:
+        if not get_student(student_match.group(0)):
+            state["pending_student"] = None
+            return "La matrícula no existe en los datos de prueba. Prueba con 2024-1001, 2024-1002 o 2023-2040."
+        state["pending_student"] = student_match.group(0)
+
+    if state.get("pending_type") and state.get("pending_student"):
+        response = register_request(state["pending_student"], state["pending_type"])
+        state["pending_type"] = state["pending_student"] = None
+        return response
+    if request_type == "Récord académico":
+        return "Puedo registrar una solicitud de récord académico. Para la demostración, escribe tu matrícula ficticia (ej.: 2024-1001). No compartas datos personales reales."
+    if request_type == "Certificación de estudio":
+        return "Puedo registrar una solicitud de certificación de estudio. Escribe tu matrícula ficticia (ej.: 2024-1001). No uses datos personales reales."
+    if student_match:
+        return f"Tengo tu matrícula **{state['pending_student']}**. ¿Qué trámite necesitas: récord académico o certificación de estudio?"
+    if any(k in prompt.lower() for k in ["estado", "seguimiento", "ticket", "solicitud"]):
+        return "Para consultar el estado, envíame el identificador del ticket (formato UT-000001). También puedes usar la sección «Consultar una solicitud»."
+    return faq_answer(prompt)

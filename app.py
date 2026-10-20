@@ -1,7 +1,7 @@
 import streamlit as st
 from core import (
-    init_db, get_student, create_request, get_request,
-    get_requirements, validate_request, list_requests, faq_answer
+    init_db, get_request,
+    list_requests, faq_answer, handle_message
 )
 
 st.set_page_config(page_title="UniTramite AI | Atención a Estudiantes", page_icon="🎓", layout="wide")
@@ -34,66 +34,13 @@ if section == "Conversar con el chatbot":
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
+    if "chat_state" not in st.session_state:
+        st.session_state.chat_state = {"pending_type": None, "pending_student": None}
 
     prompt = st.chat_input("Escribe tu consulta...")
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
-        text = prompt.lower().strip()
-        response = None
-
-        # Seguimiento de tickets
-        import re
-        ticket_match = re.search(r"(UT-\d{6})", prompt.upper())
-        if ticket_match:
-            req = get_request(ticket_match.group(1))
-            if req:
-                response = (
-                    f"**Solicitud {req['ticket']}**\n\n"
-                    f"- Tipo: {req['request_type']}\n"
-                    f"- Estado: **{req['status']}**\n"
-                    f"- Fecha de creación: {req['created_at']}\n"
-                    f"- Observación: {req['notes']}"
-                )
-            else:
-                response = "No encontré ese ticket en la base de datos simulada. Verifica el identificador o solicita ayuda al personal de atención."
-
-        # Identificar intención y matrícula
-        elif any(k in text for k in ["récord", "record", "historial académico"]):
-            st.session_state.pending_type = "Récord académico"
-            response = "Puedo registrar una solicitud de récord académico. Para la demostración, escribe tu matrícula ficticia (ej.: 2024-1001). No compartas datos personales reales."
-        elif any(k in text for k in ["certificación", "certificado", "constancia", "estudio"]):
-            st.session_state.pending_type = "Certificación de estudio"
-            response = "Puedo registrar una solicitud de certificación de estudio. Escribe tu matrícula ficticia (ej.: 2024-1001). No uses datos personales reales."
-        elif any(k in text for k in ["estado", "seguimiento", "ticket", "solicitud"]):
-            response = "Para consultar el estado, envíame el identificador del ticket (formato UT-000001). También puedes usar la sección «Consultar una solicitud»."
-        else:
-            import re
-            student_match = re.search(r"\b\d{4}-\d{4}\b", prompt)
-            if student_match and st.session_state.get("pending_type"):
-                student_id = student_match.group(0)
-                student = get_student(student_id)
-                if not student:
-                    response = "La matrícula no existe en los datos de prueba. Prueba con 2024-1001, 2024-1002 o 2023-2040."
-                else:
-                    request_type = st.session_state.pending_type
-                    checks = validate_request(student, request_type)
-                    missing = [name for name, ok in checks.items() if not ok]
-                    if missing:
-                        ticket = create_request(student_id, request_type, "Pendiente de revisión", "No cumple: " + ", ".join(missing))
-                        response = (
-                            f"Registré la solicitud **{ticket}**, pero queda **Pendiente de revisión**.\n\n"
-                            f"Validaciones que requieren atención: {', '.join(missing)}.\n\n"
-                            "El prototipo no rechaza definitivamente la solicitud ni sustituye la revisión de la oficina académica."
-                        )
-                    else:
-                        ticket = create_request(student_id, request_type, "Recibida", "Validaciones simuladas completadas; pendiente de revisión institucional.")
-                        response = (
-                            f"Las validaciones simuladas se completaron y registré la solicitud **{ticket}** con estado **Recibida**.\n\n"
-                            "Esto no significa que el documento haya sido emitido. La oficina académica debe procesar la solicitud."
-                        )
-                    st.session_state.pending_type = None
-            else:
-                response = faq_answer(prompt)
+        response = handle_message(prompt, st.session_state.chat_state)
         st.session_state.messages.append({"role": "assistant", "content": response})
         st.rerun()
 
