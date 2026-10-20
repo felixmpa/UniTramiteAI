@@ -2,7 +2,8 @@ import os
 import streamlit as st
 from core import (
     init_db, get_request,
-    list_requests, faq_answer, handle_message
+    list_requests, faq_answer, handle_message,
+    register_student, list_students
 )
 
 st.set_page_config(page_title="UniTramite AI | Atención a Estudiantes", page_icon="🎓", layout="wide")
@@ -30,6 +31,7 @@ with st.sidebar:
         "Conversar con el chatbot",
         "Consultar una solicitud",
         "Panel de solicitudes",
+        "Registro de estudiantes",
         "Preguntas frecuentes",
         "Acerca del prototipo"
     ])
@@ -82,6 +84,24 @@ elif section == "Panel de solicitudes":
     else:
         st.info("Todavía no hay solicitudes. Crea una desde el chatbot.")
 
+elif section == "Registro de estudiantes":
+    st.subheader("Registro de estudiantes — datos ficticios")
+    st.caption("Sección pensada para el personal. Usa solo datos inventados: en producción el estado de matrícula y el paz y salvo vendrían de los sistemas de la universidad y esta sección requeriría autenticación.")
+    with st.form("registro_estudiante", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        student_id = col1.text_input("Matrícula", placeholder="2025-0001")
+        full_name = col2.text_input("Nombre completo")
+        matricula_activa = col1.checkbox("Matrícula activa", value=True)
+        paz_y_salvo = col2.checkbox("Paz y salvo al día", value=True)
+        notes = st.text_input("Nota (opcional)")
+        if st.form_submit_button("Registrar estudiante", type="primary"):
+            error = register_student(student_id, full_name, matricula_activa, paz_y_salvo, notes)
+            if error:
+                st.error(error)
+            else:
+                st.success(f"Estudiante {student_id.strip()} registrado. Ya puede solicitar trámites en el chatbot.")
+    st.dataframe(list_students(), use_container_width=True, hide_index=True)
+
 elif section == "Preguntas frecuentes":
     st.subheader("Preguntas frecuentes")
     questions = [
@@ -102,7 +122,7 @@ else:
 - Interfaz web conversacional.
 - Tres flujos: récord académico, certificación y seguimiento de tickets.
 - Reglas deterministas sobre datos ficticios.
-- Registro de solicitudes en SQLite local o PostgreSQL.
+- Registro de estudiantes y solicitudes en SQLite local o PostgreSQL (Supabase).
 - Panel básico de solicitudes.
 
 **No incluido todavía**

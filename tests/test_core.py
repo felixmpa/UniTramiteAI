@@ -6,6 +6,19 @@ import core
 from core import get_student, validate_request, validate_ticket_format
 
 class TestCore(unittest.TestCase):
+    def setUp(self):
+        self.original_url = os.environ.pop("DATABASE_URL", None)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.original_db = core.DB_PATH
+        core.DB_PATH = Path(self.tmp.name) / "test.db"
+        core.init_db()
+
+    def tearDown(self):
+        core.DB_PATH = self.original_db
+        self.tmp.cleanup()
+        if self.original_url:
+            os.environ["DATABASE_URL"] = self.original_url
+
     def test_student_exists(self):
         self.assertIsNotNone(get_student("2024-1001"))
 
@@ -68,19 +81,33 @@ class TestChatSavesRequests(unittest.TestCase):
 
     def test_unknown_student_is_not_saved(self):
         reply = core.handle_message("récord para 9999-0000", self.state)
-        self.assertIn("no existe", reply)
+        self.assertIn("no está registrada", reply)
         self.assertEqual(self.saved(), [])
+
+    def test_registered_student_can_request(self):
+        self.assertIsNone(core.register_student("2025-0001", "Prueba Nueva", True, False))
+        core.handle_message("récord académico 2025-0001", self.state)
+        rows = self.saved()
+        self.assertEqual(rows[0]["Matrícula"], "2025-0001")
+        self.assertEqual(rows[0]["Estado"], "Pendiente de revisión")
+
+    def test_register_student_rejects_bad_input(self):
+        self.assertIn("formato", core.register_student("2025", "X", True, True))
+        self.assertIn("obligatorio", core.register_student("2025-0002", " ", True, True))
+        self.assertIn("ya está registrada", core.register_student("2024-1001", "Otra", True, True))
+        self.assertEqual(len(core.list_students()), 3)
 
     def test_ticket_lookup(self):
         self.assertIn("UT-000001", core.handle_message("estado de UT-000001", self.state))
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "define TEST_DATABASE_URL para probar con PostgreSQL")
 class TestChatSavesRequestsPostgres(TestChatSavesRequests):
-    """Same scenarios on PostgreSQL. WARNING: drops the requests table of TEST_DATABASE_URL."""
+    """Same scenarios on PostgreSQL. WARNING: drops the requests and students tables of TEST_DATABASE_URL."""
     def setUp(self):
         self.original_url = os.environ.get("DATABASE_URL")
         os.environ["DATABASE_URL"] = os.environ["TEST_DATABASE_URL"]
         core.run("DROP TABLE IF EXISTS requests")
+        core.run("DROP TABLE IF EXISTS students")
         core.run("DROP SEQUENCE IF EXISTS request_number_seq")
         core.init_db()
         self.state = {"pending_type": None, "pending_student": None}

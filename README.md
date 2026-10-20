@@ -10,12 +10,12 @@ Prototipo académico para demostrar flujos de atención estudiantil inspirados e
 - Simula solicitudes de récord académico y certificación de estudio.
 - Comprueba requisitos usando registros ficticios.
 - Genera un ticket y permite consultar su estado.
-- Muestra un panel de solicitudes almacenadas en SQLite (local) o PostgreSQL (nube).
+- Permite registrar estudiantes ficticios y muestra un panel de solicitudes, guardados en SQLite (local) o PostgreSQL/Supabase (nube).
 - Incluye un webhook inicial para planificar la futura conexión con WhatsApp Business; **WhatsApp no está conectado en esta versión**.
 
 ## 2. Datos: procedencia y significado
 
-Los datos de estudiantes están en `data/students.json` y fueron creados artificialmente para este prototipo. No provienen de la UASD ni contienen datos personales reales.
+Los estudiantes de prueba están en `data/students.json` y fueron creados artificialmente para este prototipo. Al iniciar la app por primera vez se copian a la tabla `students` de la base de datos. No provienen de la UASD ni contienen datos personales reales.
 
 | Matrícula ficticia | Matrícula activa | Paz y salvo | Caso de prueba |
 |---|---:|---:|---|
@@ -29,10 +29,15 @@ Las reglas están definidas en `core.py`:
 
 Estas reglas son ejemplos de desarrollo, no una afirmación sobre los requisitos oficiales vigentes de una universidad.
 
-Los estudiantes **no se guardan** en la base de datos: se leen siempre de `data/students.json`. Lo que se guarda son las **solicitudes (tickets)**, en la tabla `requests`:
+La base de datos tiene dos tablas:
 
-- **Sin configurar nada:** se usa el archivo local `unitramite.db` (SQLite), que se crea automáticamente al iniciar la aplicación.
-- **Con la variable `DATABASE_URL`:** se usa PostgreSQL en la nube (Neon, Supabase u otro). La tabla y la secuencia de tickets se crean solas al arrancar. Ver la sección 9.
+- `students`: estudiantes. Se llena con los tres casos de prueba y con los que registres en «Registro de estudiantes».
+- `requests`: solicitudes (tickets). Cada una apunta a un estudiante registrado.
+
+Dónde se guardan:
+
+- **Sin configurar nada:** en el archivo local `unitramite.db` (SQLite), que se crea automáticamente al iniciar la aplicación.
+- **Con la variable `DATABASE_URL`:** en PostgreSQL en la nube (recomendado: Supabase). Las tablas y la secuencia de tickets se crean solas al arrancar. Ver la sección 9.
 
 ## 3. Requisitos
 
@@ -84,8 +89,9 @@ Streamlit mostrará una dirección local, normalmente `http://localhost:8501`. �
 2. Cuando lo solicite, escribe la matrícula ficticia `2024-1001`. Debe registrar una solicitud y mostrar un ticket.
 3. Repite el proceso con `2024-1002`; debe dejar la solicitud pendiente de revisión porque el paz y salvo figura pendiente.
 4. En «Consultar una solicitud», consulta el ticket que acabas de recibir.
-5. En «Panel de solicitudes», muestra el registro local.
-6. Prueba una pregunta frecuente, por ejemplo: `¿El chatbot emite documentos oficiales?`.
+5. En «Panel de solicitudes», muestra el registro.
+6. En «Registro de estudiantes», registra la matrícula `2025-0001` sin paz y salvo. Vuelve al chatbot, escribe `Necesito un récord académico, mi matrícula es 2025-0001` y verifica que queda pendiente de revisión.
+7. Prueba una pregunta frecuente, por ejemplo: `¿El chatbot emite documentos oficiales?`.
 
 Los identificadores de tickets se generan en ejecución; usa el ticket que muestra la aplicación en lugar de asumir que tendrá siempre un número determinado.
 
@@ -137,23 +143,30 @@ Sustituye `TU_USUARIO` por tu usuario real de GitHub y usa la URL que GitHub asi
 4. Despliega la aplicación.
 5. Abre la URL pública y repite el guion de demostración.
 
-### Guardar las solicitudes en PostgreSQL (recomendado)
+### Guardar los datos en Supabase (recomendado)
 
-En Streamlit Community Cloud el archivo SQLite se borra cada vez que la app se reinicia o se vuelve a desplegar. Para que las solicitudes no se pierdan, usa una base PostgreSQL gestionada:
+En Streamlit Community Cloud el archivo SQLite se borra cada vez que la app se reinicia o se vuelve a desplegar. Para que estudiantes y solicitudes no se pierdan, usa Supabase (PostgreSQL gestionado, con plan gratuito):
 
-1. Crea una cuenta gratuita en [Neon](https://neon.tech) (o [Supabase](https://supabase.com)) y crea un proyecto/base de datos.
-2. Copia la cadena de conexión. Tiene esta forma: `postgresql://usuario:contraseña@host/base?sslmode=require`.
-3. En Streamlit Community Cloud abre tu app → **Settings → Secrets** y añade:
+1. Crea una cuenta en [Supabase](https://supabase.com) y un proyecto nuevo. Guarda la contraseña de la base de datos que te pide.
+2. En el proyecto pulsa **Connect** y copia la cadena de conexión del **Session pooler** (puerto `5432`). Tiene esta forma:
+   `postgresql://postgres.xxxxxxxx:[TU-CONTRASEÑA]@aws-0-us-east-1.pooler.supabase.com:5432/postgres`
+   Usa el *pooler* y no la «Direct connection»: la conexión directa solo funciona por IPv6 y Streamlit Cloud usa IPv4.
+3. Sustituye `[TU-CONTRASEÑA]` por tu contraseña. Si tiene símbolos como `@`, `#` o `/`, cámbiala por una solo con letras y números o codifícala para URL.
+4. En Streamlit Community Cloud abre tu app → **Settings → Secrets** y añade:
 
    ```toml
-   DATABASE_URL = "postgresql://usuario:contraseña@host/base?sslmode=require"
+   DATABASE_URL = "postgresql://postgres.xxxxxxxx:contraseña@aws-0-us-east-1.pooler.supabase.com:5432/postgres"
    ```
 
-4. Reinicia la app. Crea una solicitud desde el chatbot y compruébala en el «Panel de solicitudes» y en el editor de tablas de Neon/Supabase (tabla `requests`).
+5. Reinicia la app. Al arrancar crea las tablas `students` y `requests` y carga los estudiantes de prueba. Compruébalo en **Table Editor** de Supabase.
 
-Para usar PostgreSQL en tu computadora, crea el archivo `.streamlit/secrets.toml` con la misma línea, o define la variable de entorno `DATABASE_URL` antes de `streamlit run app.py`. Ese archivo está en `.gitignore`: **nunca subas la contraseña a GitHub**.
+**Seguridad:** Supabase publica las tablas del esquema `public` mediante su API REST con una clave pública (`anon`). Por eso la app activa *Row Level Security* en las dos tablas sin crear políticas: la API pública no puede leerlas ni modificarlas, mientras que la app, que se conecta como dueña de las tablas, sí. No desactives RLS. Si en el futuro quieres usar la API de Supabase o Supabase Auth, crea políticas específicas antes.
 
-Las pruebas usan SQLite temporal. Para repetirlas también contra PostgreSQL, define `TEST_DATABASE_URL` apuntando a una base **de pruebas** (las pruebas borran su tabla `requests`):
+En el plan gratuito, Supabase pausa el proyecto tras una semana sin actividad; se reactiva desde su panel. Cualquier otro PostgreSQL (Neon, por ejemplo) también funciona con la misma variable `DATABASE_URL`.
+
+Para usar la base en la nube desde tu computadora, crea el archivo `.streamlit/secrets.toml` con la misma línea, o define la variable de entorno `DATABASE_URL` antes de `streamlit run app.py`. Ese archivo está en `.gitignore`: **nunca subas la contraseña a GitHub**.
+
+Las pruebas usan SQLite temporal. Para repetirlas también contra PostgreSQL, define `TEST_DATABASE_URL` apuntando a una base **de pruebas**, nunca a la de la demo (las pruebas borran las tablas `students` y `requests`):
 
 ```bash
 TEST_DATABASE_URL="postgresql://..." python -m unittest discover -s tests -v
@@ -166,7 +179,7 @@ La disponibilidad del servicio y los pasos de la plataforma pueden cambiar. Ante
 - La aplicación web es el canal que funciona en esta versión.
 - El webhook de WhatsApp es solo una estructura inicial: no envía respuestas ni tiene validación de firma completa.
 - La matrícula ficticia sirve para demostrar el flujo, no para autenticar a una persona.
-- El estado académico y el paz y salvo se consultan en datos estáticos de prueba.
+- El estado académico y el paz y salvo se consultan en datos de prueba que se cargan a mano en «Registro de estudiantes»; esa sección no tiene autenticación.
 - El LLM/RAG, la base de conocimiento institucional y la integración real están pendientes.
 - Para producción hacen falta autenticación, autorización, protección de datos, manejo seguro de credenciales, auditoría y pruebas de seguridad.
 

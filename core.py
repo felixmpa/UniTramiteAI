@@ -21,6 +21,7 @@ def connect():
         return psycopg.connect(database_url(), row_factory=dict_row)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 def run(sql, params=(), fetch=None):
@@ -41,9 +42,18 @@ def run(sql, params=(), fetch=None):
 
 def init_db():
     run("""
+        CREATE TABLE IF NOT EXISTS students (
+            student_id TEXT PRIMARY KEY,
+            full_name TEXT NOT NULL,
+            matricula_activa BOOLEAN NOT NULL,
+            paz_y_salvo BOOLEAN NOT NULL,
+            notes TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )""")
+    run("""
         CREATE TABLE IF NOT EXISTS requests (
             ticket TEXT PRIMARY KEY,
-            student_id TEXT NOT NULL,
+            student_id TEXT NOT NULL REFERENCES students(student_id),
             request_type TEXT NOT NULL,
             status TEXT NOT NULL,
             created_at TEXT NOT NULL,
@@ -52,14 +62,55 @@ def init_db():
     if database_url():
         # The sequence hands out ticket numbers atomically across concurrent users
         run("CREATE SEQUENCE IF NOT EXISTS request_number_seq START 2")
-    # Seed tickets only once
+        # Supabase publishes the public schema through its REST API; RLS without
+        # policies blocks that API while this app (table owner) keeps full access
+        run("ALTER TABLE students ENABLE ROW LEVEL SECURITY")
+        run("ALTER TABLE requests ENABLE ROW LEVEL SECURITY")
+    # Seed demo students and tickets only once
+    if run("SELECT COUNT(*) AS n FROM students", fetch="one")["n"] == 0:
+        with open(SEED_PATH, encoding="utf-8") as f:
+            for student_id, s in json.load(f).items():
+                register_student(student_id, s["nombre"], s["matricula_activa"], s["paz_y_salvo"], s["nota"])
     if run("SELECT COUNT(*) AS n FROM requests", fetch="one")["n"] == 0:
         run("INSERT INTO requests VALUES (?, ?, ?, ?, ?, ?)", SEED_REQUEST)
 
+def validate_student_id_format(student_id):
+    return bool(re.fullmatch(r"\d{4}-\d{4}", student_id or ""))
+
 def get_student(student_id):
-    with open(SEED_PATH, encoding="utf-8") as f:
-        students = json.load(f)
-    return students.get(student_id)
+    row = run("SELECT * FROM students WHERE student_id = ?", (student_id,), fetch="one")
+    if row:
+        # SQLite returns booleans as 0/1
+        row["matricula_activa"] = bool(row["matricula_activa"])
+        row["paz_y_salvo"] = bool(row["paz_y_salvo"])
+    return row
+
+def register_student(student_id, full_name, matricula_activa, paz_y_salvo, notes=""):
+    """Store a new student; returns an error message, or None when it was saved."""
+    student_id = (student_id or "").strip()
+    full_name = (full_name or "").strip()
+    if not validate_student_id_format(student_id):
+        return "La matrícula debe tener el formato 0000-0000."
+    if not full_name:
+        return "El nombre es obligatorio."
+    if get_student(student_id):
+        return f"La matrícula {student_id} ya está registrada."
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    run("INSERT INTO students VALUES (?, ?, ?, ?, ?, ?)",
+        (student_id, full_name, bool(matricula_activa), bool(paz_y_salvo), notes.strip(), now))
+    return None
+
+def list_students():
+    rows = run("""
+        SELECT student_id AS "Matrícula", full_name AS "Nombre",
+               matricula_activa AS "Matrícula activa", paz_y_salvo AS "Paz y salvo",
+               notes AS "Nota", created_at AS "Registrado"
+        FROM students ORDER BY student_id
+    """, fetch="all")
+    for r in rows:
+        r["Matrícula activa"] = bool(r["Matrícula activa"])
+        r["Paz y salvo"] = bool(r["Paz y salvo"])
+    return rows
 
 def get_requirements(request_type):
     return {
@@ -169,7 +220,7 @@ def handle_message(prompt, state):
     if student_match:
         if not get_student(student_match.group(0)):
             state["pending_student"] = None
-            return "La matrícula no existe en los datos de prueba. Prueba con 2024-1001, 2024-1002 o 2023-2040."
+            return "La matrícula no está registrada. Regístrala en «Registro de estudiantes» o prueba con 2024-1001, 2024-1002 o 2023-2040."
         state["pending_student"] = student_match.group(0)
 
     if state.get("pending_type") and state.get("pending_student"):
