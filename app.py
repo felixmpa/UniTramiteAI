@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 from core import (
     init_db, get_request,
@@ -5,7 +6,19 @@ from core import (
 )
 
 st.set_page_config(page_title="UniTramite AI | Atención a Estudiantes", page_icon="🎓", layout="wide")
-init_db()
+
+# En Streamlit Cloud (o .streamlit/secrets.toml) la URL de PostgreSQL llega como secreto
+try:
+    if "DATABASE_URL" in st.secrets:
+        os.environ.setdefault("DATABASE_URL", st.secrets["DATABASE_URL"])
+except FileNotFoundError:
+    pass
+
+@st.cache_resource
+def setup_database():
+    init_db()
+
+setup_database()
 
 st.title("🎓 Chatbot de Atención a Estudiantes")
 st.caption("UniTramite AI · Prototipo académico con datos simulados")
@@ -89,7 +102,7 @@ else:
 - Interfaz web conversacional.
 - Tres flujos: récord académico, certificación y seguimiento de tickets.
 - Reglas deterministas sobre datos ficticios.
-- Registro local de solicitudes SQLite.
+- Registro de solicitudes en SQLite local o PostgreSQL.
 - Panel básico de solicitudes.
 
 **No incluido todavía**

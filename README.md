@@ -10,7 +10,7 @@ Prototipo académico para demostrar flujos de atención estudiantil inspirados e
 - Simula solicitudes de récord académico y certificación de estudio.
 - Comprueba requisitos usando registros ficticios.
 - Genera un ticket y permite consultar su estado.
-- Muestra un panel de solicitudes almacenadas localmente en SQLite.
+- Muestra un panel de solicitudes almacenadas en SQLite (local) o PostgreSQL (nube).
 - Incluye un webhook inicial para planificar la futura conexión con WhatsApp Business; **WhatsApp no está conectado en esta versión**.
 
 ## 2. Datos: procedencia y significado
@@ -29,7 +29,10 @@ Las reglas están definidas en `core.py`:
 
 Estas reglas son ejemplos de desarrollo, no una afirmación sobre los requisitos oficiales vigentes de una universidad.
 
-El archivo `unitramite.db` se crea automáticamente al iniciar la aplicación. SQLite guarda los tickets de demostración localmente.
+Los estudiantes **no se guardan** en la base de datos: se leen siempre de `data/students.json`. Lo que se guarda son las **solicitudes (tickets)**, en la tabla `requests`:
+
+- **Sin configurar nada:** se usa el archivo local `unitramite.db` (SQLite), que se crea automáticamente al iniciar la aplicación.
+- **Con la variable `DATABASE_URL`:** se usa PostgreSQL en la nube (Neon, Supabase u otro). La tabla y la secuencia de tickets se crean solas al arrancar. Ver la sección 9.
 
 ## 3. Requisitos
 
@@ -133,6 +136,28 @@ Sustituye `TU_USUARIO` por tu usuario real de GitHub y usa la URL que GitHub asi
 3. Selecciona el repositorio, la rama `main` y el archivo principal `app.py`.
 4. Despliega la aplicación.
 5. Abre la URL pública y repite el guion de demostración.
+
+### Guardar las solicitudes en PostgreSQL (recomendado)
+
+En Streamlit Community Cloud el archivo SQLite se borra cada vez que la app se reinicia o se vuelve a desplegar. Para que las solicitudes no se pierdan, usa una base PostgreSQL gestionada:
+
+1. Crea una cuenta gratuita en [Neon](https://neon.tech) (o [Supabase](https://supabase.com)) y crea un proyecto/base de datos.
+2. Copia la cadena de conexión. Tiene esta forma: `postgresql://usuario:contraseña@host/base?sslmode=require`.
+3. En Streamlit Community Cloud abre tu app → **Settings → Secrets** y añade:
+
+   ```toml
+   DATABASE_URL = "postgresql://usuario:contraseña@host/base?sslmode=require"
+   ```
+
+4. Reinicia la app. Crea una solicitud desde el chatbot y compruébala en el «Panel de solicitudes» y en el editor de tablas de Neon/Supabase (tabla `requests`).
+
+Para usar PostgreSQL en tu computadora, crea el archivo `.streamlit/secrets.toml` con la misma línea, o define la variable de entorno `DATABASE_URL` antes de `streamlit run app.py`. Ese archivo está en `.gitignore`: **nunca subas la contraseña a GitHub**.
+
+Las pruebas usan SQLite temporal. Para repetirlas también contra PostgreSQL, define `TEST_DATABASE_URL` apuntando a una base **de pruebas** (las pruebas borran su tabla `requests`):
+
+```bash
+TEST_DATABASE_URL="postgresql://..." python -m unittest discover -s tests -v
+```
 
 La disponibilidad del servicio y los pasos de la plataforma pueden cambiar. Antes de presentar, verifica que la URL pública abra correctamente.
 

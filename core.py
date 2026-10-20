@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from pathlib import Path
 from datetime import datetime
@@ -7,15 +8,39 @@ import re
 ROOT = Path(__file__).parent
 DB_PATH = ROOT / "unitramite.db"
 SEED_PATH = ROOT / "data" / "students.json"
+SEED_REQUEST = ("UT-000001", "2024-1001", "Récord académico", "En proceso", "2026-10-01 09:30", "Solicitud de demostración.")
+
+def database_url():
+    """PostgreSQL URL (Neon, Supabase...). Without it, the local SQLite file is used."""
+    return os.getenv("DATABASE_URL")
 
 def connect():
+    if database_url():
+        import psycopg
+        from psycopg.rows import dict_row
+        return psycopg.connect(database_url(), row_factory=dict_row)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
+def run(sql, params=(), fetch=None):
+    """Run one statement on the active database; `?` placeholders work on both engines."""
+    if database_url():
+        sql = sql.replace("?", "%s")
+    con = connect()
+    try:
+        with con:
+            cur = con.execute(sql, params)
+            if fetch == "one":
+                row = cur.fetchone()
+                return dict(row) if row else None
+            if fetch == "all":
+                return [dict(r) for r in cur.fetchall()]
+    finally:
+        con.close()
+
 def init_db():
-    with connect() as con:
-        con.execute("""
+    run("""
         CREATE TABLE IF NOT EXISTS requests (
             ticket TEXT PRIMARY KEY,
             student_id TEXT NOT NULL,
@@ -24,16 +49,12 @@ def init_db():
             created_at TEXT NOT NULL,
             notes TEXT NOT NULL
         )""")
-        count = con.execute("SELECT COUNT(*) FROM requests").fetchone()[0]
+    if database_url():
+        # The sequence hands out ticket numbers atomically across concurrent users
+        run("CREATE SEQUENCE IF NOT EXISTS request_number_seq START 2")
     # Seed tickets only once
-    if count == 0:
-        con = connect()
-        con.execute(
-            "INSERT OR IGNORE INTO requests VALUES (?, ?, ?, ?, ?, ?)",
-            ("UT-000001", "2024-1001", "Récord académico", "En proceso", "2026-10-01 09:30", "Solicitud de demostración.")
-        )
-        con.commit()
-        con.close()
+    if run("SELECT COUNT(*) AS n FROM requests", fetch="one")["n"] == 0:
+        run("INSERT INTO requests VALUES (?, ?, ?, ?, ?, ?)", SEED_REQUEST)
 
 def get_student(student_id):
     with open(SEED_PATH, encoding="utf-8") as f:
@@ -56,31 +77,29 @@ def validate_request(student, request_type):
     return {labels[r]: bool(student.get(r, False)) for r in requirements}
 
 def create_request(student_id, request_type, status, notes):
-    with connect() as con:
-        last = con.execute("SELECT ticket FROM requests ORDER BY ticket DESC LIMIT 1").fetchone()
-        number = int(last["ticket"].split("-")[1]) + 1 if last else 1
-        ticket = f"UT-{number:06d}"
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
-        con.execute(
-            "INSERT INTO requests VALUES (?, ?, ?, ?, ?, ?)",
-            (ticket, student_id, request_type, status, now, notes)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    if database_url():
+        row = run(
+            "INSERT INTO requests VALUES ('UT-' || LPAD(nextval('request_number_seq')::text, 6, '0'), ?, ?, ?, ?, ?) RETURNING ticket",
+            (student_id, request_type, status, now, notes), fetch="one"
         )
+        return row["ticket"]
+    last = run("SELECT ticket FROM requests ORDER BY ticket DESC LIMIT 1", fetch="one")
+    number = int(last["ticket"].split("-")[1]) + 1 if last else 1
+    ticket = f"UT-{number:06d}"
+    run("INSERT INTO requests VALUES (?, ?, ?, ?, ?, ?)", (ticket, student_id, request_type, status, now, notes))
     return ticket
 
 def get_request(ticket):
-    with connect() as con:
-        row = con.execute("SELECT * FROM requests WHERE ticket = ?", (ticket,)).fetchone()
-    return dict(row) if row else None
+    return run("SELECT * FROM requests WHERE ticket = ?", (ticket,), fetch="one")
 
 def list_requests():
-    with connect() as con:
-        rows = con.execute("""
-            SELECT ticket AS Ticket, student_id AS Matrícula,
-                   request_type AS Trámite, status AS Estado,
-                   created_at AS Fecha, notes AS Observación
-            FROM requests ORDER BY created_at DESC
-        """).fetchall()
-    return [dict(r) for r in rows]
+    return run("""
+        SELECT ticket AS "Ticket", student_id AS "Matrícula",
+               request_type AS "Trámite", status AS "Estado",
+               created_at AS "Fecha", notes AS "Observación"
+        FROM requests ORDER BY created_at DESC, ticket DESC
+    """, fetch="all")
 
 def faq_answer(question):
     q = question.lower()
